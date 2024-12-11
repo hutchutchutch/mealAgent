@@ -272,11 +272,15 @@ const recipeGenerator = async (state: typeof MealPlanningStateAnnotation.State,
 `;
 
     const response = await model.invoke([new HumanMessage(prompt)]);
+    const content = response.content;
+    if (typeof content !== 'string') {
+        throw new Error('Invalid response content type');
+    }
 
     // Parse and validate the response
     const recipe = RecipeSchema.parse(JSON.parse(response.content as string));
 
-    return { recipe };
+    return { recipes: [recipe] };
 };
 
 
@@ -298,7 +302,7 @@ const recipeValidator = async (state: typeof MealPlanningStateAnnotation.State,
   "task": {
     "description": "Analyze recipe and validate against requirements",
     "inputs": {
-      "recipe": ${JSON.stringify(state.recipe, null, 2)},
+      "recipe": ${JSON.stringify(state.recipes, null, 2)},
       "nutritionalTargets": {
         "calories": ${state.userPreferences.caloriesPerMeal},
         "protein": ${state.userPreferences.proteinPerMeal}
@@ -346,11 +350,16 @@ const recipeValidator = async (state: typeof MealPlanningStateAnnotation.State,
 }`;
 
     const response = await model.invoke([new HumanMessage(prompt)]);
-    
+    const content = response.content;
+    if (typeof content !== 'string') {
+        throw new Error('Invalid response content type');
+    }
+
     // Parse and validate the response
     const validationResults = ValidationResultSchema.parse(JSON.parse(response.content as string));
 
-    return { validationResults };
+    return { validationRules: [validationResults] };
+
 };
 
 
@@ -358,27 +367,29 @@ const recipeValidator = async (state: typeof MealPlanningStateAnnotation.State,
 const recipeEditor = async (state: typeof MealPlanningStateAnnotation.State,
     config: RunnableConfig
 ): Promise<typeof MealPlanningStateAnnotation.Update> => {
-    const failedRules = state.validationResults?.filter(rule => rule.status === "fail");
+    const failedRules = state.validationRules?.[0]?.filter(rule => rule.status === "fail");
 
     const prompt = `Edit this recipe to fix the following issues:
-  Recipe: ${JSON.stringify(state.recipe, null, 2)}
+  Recipe: ${JSON.stringify(state.recipes[0], null, 2)}
   Failed validations: ${JSON.stringify(failedRules, null, 2)}
-  
-  User Requirements:
-  - Target calories: ${state.userPreferences.caloriesPerMeal}
-  - Target protein: ${state.userPreferences.proteinPerMeal}
-  - Allergens to avoid: ${state.userPreferences.allergens.join(', ')}
-  - Dietary preferences: ${state.userPreferences.dietaryPreferences.join(', ')}
-  - Disliked foods: ${state.userPreferences.dislikedFoods.join(', ')}
-  
+  User preferences: ${JSON.stringify(state.userPreferences, null, 2)}
+
   Provide the complete edited recipe in the same structured format.`;
 
     const response = await model.invoke([new HumanMessage(prompt)]);
+    const content = response.content;
+    if (typeof content !== 'string') {
+        throw new Error('Invalid response content type');
+    }
 
     // Parse and validate the response
     const recipe = RecipeSchema.parse(JSON.parse(response.content as string));
 
-    return { recipe };
+    const editedRecipe = RecipeSchema.parse(JSON.parse(response.content as string));
+    if (!editedRecipe) {
+        return { recipes: state.recipes };
+    }
+    return { recipes: [editedRecipe] };
 };
 
 // Shopping List Generator Node
@@ -386,24 +397,29 @@ const shoppingListGenerator = async (state: typeof MealPlanningStateAnnotation.S
     config: RunnableConfig
 ): Promise<typeof MealPlanningStateAnnotation.Update> => {
     const prompt = `Create a categorized shopping list from this recipe:
-  ${JSON.stringify(state.recipe, null, 2)}
+  ${JSON.stringify(state.recipes, null, 2)}
   
   Group items by category (produce, dairy, pantry, etc.) and include quantities.
   Return as a JSON object where each category contains an array of items with quantities.`;
 
     const response = await model.invoke([new HumanMessage(prompt)]);
+    const content = response.content;
+    if (typeof content !== 'string') {
+        throw new Error('Invalid response content type');
+    }
 
     // Parse and validate the response
-    const shoppingList = ShoppingListSchema.parse(JSON.parse(response.content as string));
+    const shoppingLists = ShoppingListSchema.parse(JSON.parse(response.content as string));
 
-    return { shoppingList };
+    return { shoppingList: [shoppingLists] };
+
 };
 
 // Validation routing logic
 const shouldContinueValidation = (state: typeof MealPlanningStateAnnotation.State) => {
     // Check if validationResults exists and if any rule has "fail" status
-    const hasFailedRules = state.validationResults?.some(rule => rule.status === "fail");
-    
+    const hasFailedRules = state.validationRules?.[0]?.some(rule => rule.status === "fail");
+
     // If there are failed rules, return "recipe_editor", otherwise return END
     return hasFailedRules ? "recipe_editor" : END;
 };
@@ -429,16 +445,15 @@ const createMainGraph = () => {
         shouldContinueValidation,
         {
             "recipe_editor": "editor",
-            [END]: "shopping_list"
+            'shopping_list': "shopping_list"
         }
     );
-    workflow.addEdge("validator", "shopping_list");
+    // workflow.addEdge("validator", "shopping_list");
     workflow.addEdge("shopping_list", END);
 
     return workflow.compile({ checkpointer: new MemorySaver() });
 
 };
-// Create the application
 const app = createMainGraph();
 
 // Example usage
@@ -449,12 +464,13 @@ const runWorkflow = async () => {
             proteinPerMeal: 20,
             allergens: ["peanuts", "tree nuts"],
             dietaryPreferences: ["vegetarian"],
+            likedFoods: ["spinach", "broccoli"],
             dislikedFoods: ["garlic", "onions"],
             location: "California"
         },
-        recipe: undefined,
-        validationResults: undefined,
-        shoppingList: undefined
+        recipes: [],
+        validationRules: [],
+        shoppingList: []
     };
 
     const finalState = await app.invoke(initialState);
