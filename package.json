@@ -1,0 +1,11 @@
+{
+  "name": "meal_agent",
+  "version": "1.0.0",
+  "description": "LangGraph implementation for a team of Agents that will generate meal plans with recipes and shopping lists.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
