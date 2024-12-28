@@ -1,3 +1,4 @@
+import { ChatOpenAI, OpenAI } from "@langchain/openai";
 import { BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import { MemorySaver } from "@langchain/langgraph";
